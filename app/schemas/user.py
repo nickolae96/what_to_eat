@@ -2,6 +2,8 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime, date
 from typing import Optional
 
+from app.models.user import ActivityLevel, Goal, Gender
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -34,25 +36,31 @@ class LoginRequest(BaseModel):
 
 class UserProfileCreate(BaseModel):
     date_of_birth: date
+    gender: Optional[Gender] = None
     weight: float
     height: float
-    goal: Optional[str] = None
+    goal: Optional[Goal] = None
+    activity_level: Optional[ActivityLevel] = None
 
 
 class UserProfileUpdate(BaseModel):
     date_of_birth: Optional[date] = None
+    gender: Optional[Gender] = None
     weight: Optional[float] = None
     height: Optional[float] = None
-    goal: Optional[str] = None
+    goal: Optional[Goal] = None
+    activity_level: Optional[ActivityLevel] = None
 
 
 class UserProfileRead(BaseModel):
     id: int
     user_id: int
     date_of_birth: date
+    gender: Optional[Gender] = None
     weight: float
     height: float
-    goal: Optional[str] = None
+    goal: Optional[Goal] = None
+    activity_level: Optional[ActivityLevel] = None
 
     model_config = {"from_attributes": True}
 

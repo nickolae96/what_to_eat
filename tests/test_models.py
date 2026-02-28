@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User, UserProfile
+from app.models.user import User, UserProfile, ActivityLevel, Goal, Gender
 from app.core.auth import hash_password
 
 
@@ -53,9 +53,11 @@ class TestUserProfileModel:
         profile = UserProfile(
             user_id=user.id,
             date_of_birth=date(1990, 5, 15),
+            gender=Gender.MALE,
             weight=75.5,
             height=180.0,
-            goal="lose weight",
+            goal=Goal.CUT,
+            activity_level=ActivityLevel.MODERATELY_ACTIVE,
         )
         db_session.add(profile)
         await db_session.flush()
@@ -64,9 +66,11 @@ class TestUserProfileModel:
         assert profile.id is not None
         assert profile.user_id == user.id
         assert profile.date_of_birth == date(1990, 5, 15)
+        assert profile.gender == Gender.MALE
         assert profile.weight == 75.5
         assert profile.height == 180.0
-        assert profile.goal == "lose weight"
+        assert profile.goal == Goal.CUT
+        assert profile.activity_level == ActivityLevel.MODERATELY_ACTIVE
 
     async def test_profile_user_id_unique(self, db_session: AsyncSession):
         user = User(email="one@example.com", hashed_password="h")
@@ -120,7 +124,7 @@ class TestUserProfileModel:
             date_of_birth=date(1988, 12, 1),
             weight=90.0,
             height=185.0,
-            goal="gain muscle",
+            goal=Goal.BULK,
         )
         db_session.add(profile)
         await db_session.flush()
@@ -128,5 +132,119 @@ class TestUserProfileModel:
         # refresh user so the relationship is loaded
         await db_session.refresh(user, ["profile"])
         assert user.profile is not None
-        assert user.profile.goal == "gain muscle"
+        assert user.profile.goal == Goal.BULK
+
+    @pytest.mark.parametrize("level", list(ActivityLevel))
+    async def test_activity_level_values(self, db_session: AsyncSession, level: ActivityLevel):
+        user = User(email=f"{level.value}@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+            activity_level=level,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.activity_level == level
+
+    async def test_activity_level_nullable(self, db_session: AsyncSession):
+        user = User(email="nolevel@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.activity_level is None
+
+    @pytest.mark.parametrize("goal", list(Goal))
+    async def test_goal_values(self, db_session: AsyncSession, goal: Goal):
+        user = User(email=f"{goal.value}@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+            goal=goal,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.goal == goal
+
+    async def test_goal_nullable(self, db_session: AsyncSession):
+        user = User(email="nogoal@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.goal is None
+
+    @pytest.mark.parametrize("gender", list(Gender))
+    async def test_gender_values(self, db_session: AsyncSession, gender: Gender):
+        user = User(email=f"{gender.value}@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+            gender=gender,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.gender == gender
+
+    async def test_gender_nullable(self, db_session: AsyncSession):
+        user = User(email="nogender@example.com", hashed_password="h")
+        db_session.add(user)
+        await db_session.flush()
+        await db_session.refresh(user)
+
+        profile = UserProfile(
+            user_id=user.id,
+            date_of_birth=date(2000, 1, 1),
+            weight=70,
+            height=175,
+        )
+        db_session.add(profile)
+        await db_session.flush()
+        await db_session.refresh(profile)
+
+        assert profile.gender is None
 

@@ -20,7 +20,8 @@ async def wait_for_db(engine, retries=10, delay=1):
     for i in range(retries):
         try:
             async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+                """"""
+                # await conn.run_sync(Base.metadata.create_all)
                 # await conn.execute("SELECT 1")  # enable this with first real deploy instead of create_all
             print("Database ready!")
             return
