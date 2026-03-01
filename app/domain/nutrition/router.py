@@ -18,6 +18,7 @@ from app.domain.nutrition.schemas import (
     MealRead,
 )
 from app.domain.user.models import User
+from app.domain.health.models import UserProfile
 
 router = APIRouter(prefix="/nutrition", tags=["nutrition"])
 
@@ -153,14 +154,30 @@ def _calculate_item_macros(food: Food, quantity_g: float) -> dict:
     }
 
 
+async def _get_profile_or_404(user: User, db: AsyncSession) -> UserProfile:
+    result = await db.execute(
+        select(UserProfile).where(UserProfile.user_id == user.id)
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found",
+        )
+    return profile
+
+
 @router.post("/meals", response_model=MealRead, status_code=status.HTTP_201_CREATED)
 async def create_meal(
     data: MealCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
+    profile = await _get_profile_or_404(current_user, db)
+
     meal = Meal(
-        user_id=current_user.id,
+        profile_id=profile.id,
+        daily_log_id=data.daily_log_id,
         meal_type=data.meal_type,
         raw_input_text=data.raw_input_text,
     )
@@ -209,10 +226,12 @@ async def list_meals(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
+    profile = await _get_profile_or_404(current_user, db)
+
     stmt = (
         select(Meal)
         .options(selectinload(Meal.items))
-        .where(Meal.user_id == current_user.id)
+        .where(Meal.profile_id == profile.id)
         .offset(skip)
         .limit(limit)
     )
@@ -226,10 +245,12 @@ async def get_meal(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
+    profile = await _get_profile_or_404(current_user, db)
+
     stmt = (
         select(Meal)
         .options(selectinload(Meal.items))
-        .where(Meal.id == meal_id, Meal.user_id == current_user.id)
+        .where(Meal.id == meal_id, Meal.profile_id == profile.id)
     )
     result = await db.execute(stmt)
     meal = result.scalar_one_or_none()
@@ -244,7 +265,9 @@ async def delete_meal(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    stmt = select(Meal).where(Meal.id == meal_id, Meal.user_id == current_user.id)
+    profile = await _get_profile_or_404(current_user, db)
+
+    stmt = select(Meal).where(Meal.id == meal_id, Meal.profile_id == profile.id)
     result = await db.execute(stmt)
     meal = result.scalar_one_or_none()
     if meal is None:

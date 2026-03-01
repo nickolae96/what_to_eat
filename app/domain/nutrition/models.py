@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
-    from app.domain.user.models import User
+    from app.domain.health.models import DailyLog, UserProfile
 
 
 class Food(Base):
@@ -51,7 +51,10 @@ class Meal(Base):
     __tablename__ = "meals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), nullable=False)
+    daily_log_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("daily_logs.id"), nullable=True
+    )
 
     meal_type: Mapped[str | None] = mapped_column(String, nullable=True)
     raw_input_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -66,7 +69,8 @@ class Meal(Base):
         back_populates="meal",
         cascade="all, delete-orphan",
     )
-    user: Mapped["User"] = relationship("User")
+    profile: Mapped["UserProfile"] = relationship("UserProfile", back_populates="meals")
+    daily_log: Mapped["DailyLog | None"] = relationship("DailyLog", back_populates="meals")
 
 
 class MealItem(Base):

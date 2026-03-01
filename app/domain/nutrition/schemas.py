@@ -80,12 +80,14 @@ class MealItemRead(BaseModel):
 class MealCreate(BaseModel):
     meal_type: Optional[str] = None
     raw_input_text: Optional[str] = None
+    daily_log_id: Optional[uuid.UUID] = None
     items: list[MealItemCreate] = []
 
 
 class MealRead(BaseModel):
     id: uuid.UUID
-    user_id: int
+    profile_id: int
+    daily_log_id: Optional[uuid.UUID] = None
     meal_type: Optional[str] = None
     raw_input_text: Optional[str] = None
     total_calories: float

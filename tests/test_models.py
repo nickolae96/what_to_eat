@@ -1,10 +1,11 @@
 import pytest
+import uuid
 from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.user.models import User
-from app.domain.health.models import UserProfile, ActivityLevel, Goal, Gender
+from app.domain.health.models import UserProfile, UserTargets, DailyLog, ActivityLevel, Goal, Gender
 from app.core.auth import hash_password
 
 
@@ -248,4 +249,169 @@ class TestUserProfileModel:
         await db_session.refresh(profile)
 
         assert profile.gender is None
+
+
+async def _make_profile(db: AsyncSession, email: str = "daily@example.com") -> UserProfile:
+    user = User(email=email, hashed_password="h")
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+
+    profile = UserProfile(
+        user_id=user.id,
+        date_of_birth=date(1990, 1, 1),
+        weight=75,
+        height=180,
+    )
+    db.add(profile)
+    await db.flush()
+    await db.refresh(profile)
+    return profile
+
+
+class TestDailyLogModel:
+    async def test_create_daily_log(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log)
+        await db_session.flush()
+        await db_session.refresh(log)
+
+        assert log.id is not None
+        assert isinstance(log.id, uuid.UUID)
+        assert log.profile_id == profile.id
+        assert log.date == date(2026, 3, 1)
+
+    async def test_daily_log_defaults(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log)
+        await db_session.flush()
+        await db_session.refresh(log)
+
+        assert log.total_calories == 0
+        assert log.total_protein_g == 0
+        assert log.total_carbs_g == 0
+        assert log.total_fat_g == 0
+
+    async def test_daily_log_uuid_auto_generated(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log1 = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        log2 = DailyLog(profile_id=profile.id, date=date(2026, 3, 2))
+        db_session.add_all([log1, log2])
+        await db_session.flush()
+
+        assert log1.id != log2.id
+
+    async def test_unique_profile_date_constraint(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log1 = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log1)
+        await db_session.flush()
+
+        log2 = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log2)
+        with pytest.raises(Exception):  # IntegrityError
+            await db_session.flush()
+        await db_session.rollback()
+
+    async def test_different_profiles_same_date_allowed(self, db_session: AsyncSession):
+        p1 = await _make_profile(db_session, email="user1@example.com")
+        p2 = await _make_profile(db_session, email="user2@example.com")
+
+        log1 = DailyLog(profile_id=p1.id, date=date(2026, 3, 1))
+        log2 = DailyLog(profile_id=p2.id, date=date(2026, 3, 1))
+        db_session.add_all([log1, log2])
+        await db_session.flush()
+
+        assert log1.id != log2.id
+
+    async def test_daily_log_profile_relationship(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log)
+        await db_session.flush()
+        await db_session.refresh(log, ["profile"])
+
+        assert log.profile.id == profile.id
+
+    async def test_profile_daily_logs_relationship(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        db_session.add(DailyLog(profile_id=profile.id, date=date(2026, 3, 1)))
+        db_session.add(DailyLog(profile_id=profile.id, date=date(2026, 3, 2)))
+        await db_session.flush()
+        await db_session.refresh(profile, ["daily_logs"])
+
+        assert len(profile.daily_logs) == 2
+        # ordered desc by date
+        assert profile.daily_logs[0].date == date(2026, 3, 2)
+        assert profile.daily_logs[1].date == date(2026, 3, 1)
+
+    async def test_cascade_delete_profile_removes_daily_logs(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+        user_id = profile.user_id
+
+        log = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log)
+        await db_session.flush()
+        log_id = log.id
+
+        # delete user → cascades to profile → cascades to daily_logs
+        result = await db_session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one()
+        await db_session.delete(user)
+        await db_session.flush()
+
+        result = await db_session.execute(
+            select(DailyLog).where(DailyLog.id == log_id)
+        )
+        assert result.scalar_one_or_none() is None
+
+    async def test_daily_log_with_totals(self, db_session: AsyncSession):
+        profile = await _make_profile(db_session)
+
+        log = DailyLog(
+            profile_id=profile.id,
+            date=date(2026, 3, 1),
+            total_calories=2200,
+            total_protein_g=180,
+            total_carbs_g=250,
+            total_fat_g=70,
+        )
+        db_session.add(log)
+        await db_session.flush()
+        await db_session.refresh(log)
+
+        assert log.total_calories == 2200
+        assert log.total_protein_g == 180
+        assert log.total_carbs_g == 250
+        assert log.total_fat_g == 70
+
+    async def test_daily_log_meals_relationship(self, db_session: AsyncSession):
+        from app.domain.nutrition.models import Meal
+
+        profile = await _make_profile(db_session)
+
+        log = DailyLog(profile_id=profile.id, date=date(2026, 3, 1))
+        db_session.add(log)
+        await db_session.flush()
+
+        meal = Meal(
+            profile_id=profile.id,
+            daily_log_id=log.id,
+            meal_type="breakfast",
+        )
+        db_session.add(meal)
+        await db_session.flush()
+        await db_session.refresh(log, ["meals"])
+
+        assert len(log.meals) == 1
+        assert log.meals[0].meal_type == "breakfast"
+
 

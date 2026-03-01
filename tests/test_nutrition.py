@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 
 import pytest
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from app.domain.nutrition.schemas import (
     MealRead,
 )
 from app.domain.user.models import User
+from app.domain.health.models import UserProfile
 
 
 def _make_food(**overrides) -> Food:
@@ -38,12 +40,22 @@ def _make_food(**overrides) -> Food:
     return Food(**defaults)
 
 
-async def _persist_user(db: AsyncSession, email: str = "meal@example.com") -> User:
+async def _persist_profile(db: AsyncSession, email: str = "meal@example.com") -> UserProfile:
     user = User(email=email, hashed_password=hash_password("pw"))
     db.add(user)
     await db.flush()
     await db.refresh(user)
-    return user
+
+    profile = UserProfile(
+        user_id=user.id,
+        date_of_birth=date(1990, 1, 1),
+        weight=75,
+        height=180,
+    )
+    db.add(profile)
+    await db.flush()
+    await db.refresh(profile)
+    return profile
 
 
 async def _persist_food(db: AsyncSession, **overrides) -> Food:
@@ -155,10 +167,10 @@ class TestFoodAliasModel:
 
 class TestMealModel:
     async def test_create_meal(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
+        profile = await _persist_profile(db_session)
 
         meal = Meal(
-            user_id=user.id,
+            profile_id=profile.id,
             meal_type="breakfast",
             raw_input_text="eggs and toast",
         )
@@ -168,13 +180,13 @@ class TestMealModel:
 
         assert meal.id is not None
         assert isinstance(meal.id, uuid.UUID)
-        assert meal.user_id == user.id
+        assert meal.profile_id == profile.id
         assert meal.meal_type == "breakfast"
         assert meal.raw_input_text == "eggs and toast"
 
     async def test_meal_defaults(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
-        meal = Meal(user_id=user.id)
+        profile = await _persist_profile(db_session)
+        meal = Meal(profile_id=profile.id)
         db_session.add(meal)
         await db_session.flush()
         await db_session.refresh(meal)
@@ -186,20 +198,20 @@ class TestMealModel:
         assert meal.meal_type is None
         assert meal.raw_input_text is None
 
-    async def test_meal_user_relationship(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
-        meal = Meal(user_id=user.id, meal_type="lunch")
+    async def test_meal_profile_relationship(self, db_session: AsyncSession):
+        profile = await _persist_profile(db_session)
+        meal = Meal(profile_id=profile.id, meal_type="lunch")
         db_session.add(meal)
         await db_session.flush()
-        await db_session.refresh(meal, ["user"])
+        await db_session.refresh(meal, ["profile"])
 
-        assert meal.user.email == "meal@example.com"
+        assert meal.profile.id == profile.id
 
     async def test_cascade_delete_meal_removes_items(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
+        profile = await _persist_profile(db_session)
         food = await _persist_food(db_session)
 
-        meal = Meal(user_id=user.id)
+        meal = Meal(profile_id=profile.id)
         db_session.add(meal)
         await db_session.flush()
 
@@ -227,9 +239,9 @@ class TestMealModel:
 
 class TestMealItemModel:
     async def test_create_meal_item(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
+        profile = await _persist_profile(db_session)
         food = await _persist_food(db_session)
-        meal = Meal(user_id=user.id, meal_type="dinner")
+        meal = Meal(profile_id=profile.id, meal_type="dinner")
         db_session.add(meal)
         await db_session.flush()
 
@@ -257,9 +269,9 @@ class TestMealItemModel:
         assert item.calculated_fat_g == 5.4
 
     async def test_meal_item_relationships(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
+        profile = await _persist_profile(db_session)
         food = await _persist_food(db_session, name="Rice")
-        meal = Meal(user_id=user.id)
+        meal = Meal(profile_id=profile.id)
         db_session.add(meal)
         await db_session.flush()
 
@@ -280,10 +292,10 @@ class TestMealItemModel:
         assert item.food.name == "Rice"
 
     async def test_meal_items_list(self, db_session: AsyncSession):
-        user = await _persist_user(db_session)
+        profile = await _persist_profile(db_session)
         food1 = await _persist_food(db_session, name="Eggs")
         food2 = await _persist_food(db_session, name="Bacon")
-        meal = Meal(user_id=user.id)
+        meal = Meal(profile_id=profile.id)
         db_session.add(meal)
         await db_session.flush()
 
@@ -593,8 +605,9 @@ class TestMealReadSchema:
             calculated_fat_g = 3.6
 
         class FakeMeal:
-            id = item_id_outer
-            user_id = 1
+            id = meal_id_outer
+            profile_id = 1
+            daily_log_id = None
             meal_type = "dinner"
             raw_input_text = "grilled chicken"
             total_calories = 165.0
@@ -604,8 +617,8 @@ class TestMealReadSchema:
             items = [FakeItem()]
 
         data = MealRead.model_validate(FakeMeal())
-        assert data.id == item_id_outer
-        assert data.user_id == 1
+        assert data.id == meal_id_outer
+        assert data.profile_id == 1
         assert data.meal_type == "dinner"
         assert len(data.items) == 1
         assert data.total_calories == 165.0
@@ -615,7 +628,8 @@ class TestMealReadSchema:
 
         class FakeMeal:
             id = meal_id
-            user_id = 1
+            profile_id = 1
+            daily_log_id = None
             meal_type = None
             raw_input_text = None
             total_calories = 0

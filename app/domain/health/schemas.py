@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel, Field
 from datetime import date
 from typing import Optional
@@ -56,4 +58,23 @@ class TargetsOverride(BaseModel):
     protein_g: Optional[float] = Field(default=None, gt=0)
     fat_g: Optional[float] = Field(default=None, gt=0)
     carbs_g: Optional[float] = Field(default=None, gt=0)
+
+
+# ── DailyLog ──────────────────────────────────────────────────────────
+
+class DailyLogCreate(BaseModel):
+    date: date
+
+
+class DailyLogRead(BaseModel):
+    id: uuid.UUID
+    profile_id: int
+    date: date
+    total_calories: float
+    total_protein_g: float
+    total_carbs_g: float
+    total_fat_g: float
+
+    model_config = {"from_attributes": True}
+
 

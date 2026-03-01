@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import get_current_user
 from app.core.database import get_db_session
 from app.domain.user.models import User
-from app.domain.health.models import UserProfile, UserTargets
-from app.domain.health.schemas import ProfileCreate, ProfileRead, ProfileUpdate, TargetsRead, TargetsOverride
+from app.domain.health.models import UserProfile, UserTargets, DailyLog
+from app.domain.health.schemas import ProfileCreate, ProfileRead, ProfileUpdate, TargetsRead, TargetsOverride, DailyLogCreate, DailyLogRead
 from app.domain.health.engine import calculate_age, calculate_targets, calculate_manual_targets
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -241,4 +241,115 @@ async def get_targets_history(
         .order_by(UserTargets.id.desc())
     )
     return result.scalars().all()
+
+
+# ── DailyLog CRUD ─────────────────────────────────────────────────────
+
+
+async def _get_profile_or_404(user: User, db: AsyncSession) -> UserProfile:
+    result = await db.execute(
+        select(UserProfile).where(UserProfile.user_id == user.id)
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found",
+        )
+    return profile
+
+
+@router.post("/daily-logs", response_model=DailyLogRead, status_code=status.HTTP_201_CREATED)
+async def create_daily_log(
+    data: DailyLogCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    profile = await _get_profile_or_404(current_user, db)
+
+    # Check for existing log on this date
+    result = await db.execute(
+        select(DailyLog).where(
+            DailyLog.profile_id == profile.id,
+            DailyLog.date == data.date,
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Daily log already exists for this date",
+        )
+
+    log = DailyLog(profile_id=profile.id, date=data.date)
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+@router.get("/daily-logs", response_model=list[DailyLogRead])
+async def list_daily_logs(
+    skip: int = 0,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    profile = await _get_profile_or_404(current_user, db)
+
+    result = await db.execute(
+        select(DailyLog)
+        .where(DailyLog.profile_id == profile.id)
+        .order_by(DailyLog.date.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+@router.get("/daily-logs/{log_id}", response_model=DailyLogRead)
+async def get_daily_log(
+    log_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    profile = await _get_profile_or_404(current_user, db)
+
+    result = await db.execute(
+        select(DailyLog).where(
+            DailyLog.id == log_id,
+            DailyLog.profile_id == profile.id,
+        )
+    )
+    log = result.scalar_one_or_none()
+    if log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Daily log not found",
+        )
+    return log
+
+
+@router.delete("/daily-logs/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_daily_log(
+    log_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    profile = await _get_profile_or_404(current_user, db)
+
+    result = await db.execute(
+        select(DailyLog).where(
+            DailyLog.id == log_id,
+            DailyLog.profile_id == profile.id,
+        )
+    )
+    log = result.scalar_one_or_none()
+    if log is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Daily log not found",
+        )
+    await db.delete(log)
+    await db.flush()
+
 
