@@ -6,10 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
 from app.core.database import get_db_session
-from app.models.user import User, UserProfile, UserTargets
-from app.schemas.user import UserProfileCreate, UserProfileRead, UserProfileUpdate
-from app.schemas.health import UserTargetsRead, UserTargetsOverride
-from app.services.health_engine import calculate_age, calculate_targets, calculate_manual_targets
+from app.domain.user.models import User
+from app.domain.health.models import UserProfile, UserTargets
+from app.domain.health.schemas import ProfileCreate, ProfileRead, ProfileUpdate, TargetsRead, TargetsOverride
+from app.domain.health.engine import calculate_age, calculate_targets, calculate_manual_targets
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -50,9 +50,9 @@ async def _recalculate_targets(profile: UserProfile, db: AsyncSession) -> None:
     await db.flush()
 
 
-@router.post("", response_model=UserProfileRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProfileRead, status_code=status.HTTP_201_CREATED)
 async def create_profile(
-    data: UserProfileCreate,
+    data: ProfileCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -83,7 +83,7 @@ async def create_profile(
     return profile
 
 
-@router.get("", response_model=UserProfileRead)
+@router.get("", response_model=ProfileRead)
 async def get_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
@@ -100,9 +100,9 @@ async def get_profile(
     return profile
 
 
-@router.put("", response_model=UserProfileRead)
+@router.put("", response_model=ProfileRead)
 async def update_profile(
-    data: UserProfileUpdate,
+    data: ProfileUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -148,7 +148,7 @@ async def delete_profile(
     await db.flush()
 
 
-@router.get("/targets", response_model=UserTargetsRead)
+@router.get("/targets", response_model=TargetsRead)
 async def get_current_targets(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
@@ -178,9 +178,9 @@ async def get_current_targets(
     return targets
 
 
-@router.put("/targets", response_model=UserTargetsRead)
+@router.put("/targets", response_model=TargetsRead)
 async def override_targets(
-    data: UserTargetsOverride,
+    data: TargetsOverride,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -220,7 +220,7 @@ async def override_targets(
     return targets
 
 
-@router.get("/targets/history", response_model=list[UserTargetsRead])
+@router.get("/targets/history", response_model=list[TargetsRead])
 async def get_targets_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
@@ -241,5 +241,4 @@ async def get_targets_history(
         .order_by(UserTargets.id.desc())
     )
     return result.scalars().all()
-
 

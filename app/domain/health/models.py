@@ -1,10 +1,15 @@
-import enum
+from __future__ import annotations
 
-from sqlalchemy import Boolean, DateTime, String, func, Index, ForeignKey, Date, Float, Enum
-from sqlalchemy.dialects.postgresql import CITEXT
+import enum
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Boolean, Date, Enum, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from datetime import date
+
+if TYPE_CHECKING:
+    from app.domain.user.models import User
 
 
 class ActivityLevel(str, enum.Enum):
@@ -27,26 +32,20 @@ class Gender(str, enum.Enum):
     FEMALE = "female"
 
 
-class User(Base):
-    __tablename__ = "users"
+ACTIVITY_MULTIPLIER: dict[ActivityLevel, float] = {
+    ActivityLevel.SEDENTARY: 1.2,
+    ActivityLevel.LIGHTLY_ACTIVE: 1.375,
+    ActivityLevel.MODERATELY_ACTIVE: 1.55,
+    ActivityLevel.VERY_ACTIVE: 1.725,
+    ActivityLevel.ATHLETE: 1.9,
+}
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[date] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[date] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-    profile: Mapped["UserProfile"] = relationship(
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    __table_args__ = (
-        Index("ix_users_email", "email"),
-    )
+GOAL_CALORIE_MULTIPLIER: dict[Goal, float] = {
+    Goal.CUT: 0.825,
+    Goal.MAINTAIN: 1.0,
+    Goal.BULK: 1.15,
+    Goal.RECOMP: 1.0,
+}
 
 
 class UserProfile(Base):
@@ -60,7 +59,7 @@ class UserProfile(Base):
     height: Mapped[float] = mapped_column(Float, nullable=False)
     goal: Mapped[Goal | None] = mapped_column(Enum(Goal), nullable=True)
     activity_level: Mapped[ActivityLevel | None] = mapped_column(Enum(ActivityLevel), nullable=True)
-    user: Mapped["User"] = relationship(back_populates="profile")
+    user: Mapped["User"] = relationship("User", back_populates="profile")
     targets: Mapped[list["UserTargets"]] = relationship(
         back_populates="profile",
         cascade="all, delete-orphan",
@@ -82,3 +81,4 @@ class UserTargets(Base):
     based_on_goal: Mapped[str] = mapped_column(String(50), nullable=False)
     is_manual: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     profile: Mapped["UserProfile"] = relationship(back_populates="targets")
+

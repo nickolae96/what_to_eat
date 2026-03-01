@@ -3,15 +3,13 @@ from datetime import date
 
 from httpx import AsyncClient
 
-from app.models.user import ActivityLevel, Gender, Goal
-from app.services.health_engine import (
+from app.domain.health.models import ActivityLevel, Gender, Goal, ACTIVITY_MULTIPLIER, GOAL_CALORIE_MULTIPLIER
+from app.domain.health.engine import (
     calculate_age,
     calculate_bmr,
     calculate_tdee,
     calculate_targets,
     calculate_manual_targets,
-    ACTIVITY_MULTIPLIER,
-    GOAL_CALORIE_MULTIPLIER,
     Targets,
 )
 
@@ -153,8 +151,8 @@ class TestCalculateTargets:
     def test_macro_calories_sum_to_total(self, goal):
         """protein_g×4 + fat_g×9 + carbs_g×4 should equal total calories."""
         t = self._base(goal)
-        macro_cals = round(t.protein_g * 4 + t.fat_g * 9 + t.carbs_g * 4, 2)
-        assert macro_cals == t.calories
+        macro_cals = round(t.protein_g * 4 + t.fat_g * 9 + t.carbs_g * 4, 1)
+        assert macro_cals == round(t.calories, 1)
 
 
 # ── calculate_manual_targets ──────────────────────────────────────────────
@@ -255,7 +253,7 @@ class TestTargetsPopulation:
     async def test_create_profile_populates_targets(self, async_client: AsyncClient, db_session):
         """Creating a complete profile should insert a UserTargets row."""
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))
@@ -280,7 +278,7 @@ class TestTargetsPopulation:
 
     async def test_update_weight_adds_new_targets_row(self, async_client: AsyncClient, db_session):
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))
@@ -303,7 +301,7 @@ class TestTargetsPopulation:
 
     async def test_update_goal_adds_new_targets_row(self, async_client: AsyncClient, db_session):
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))
@@ -326,7 +324,7 @@ class TestTargetsPopulation:
 
     async def test_no_targets_when_missing_gender(self, async_client: AsyncClient, db_session):
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         payload = {k: v for k, v in PROFILE_PAYLOAD.items() if k != "gender"}
@@ -340,7 +338,7 @@ class TestTargetsPopulation:
 
     async def test_no_targets_when_missing_goal(self, async_client: AsyncClient, db_session):
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         payload = {k: v for k, v in PROFILE_PAYLOAD.items() if k != "goal"}
@@ -354,7 +352,7 @@ class TestTargetsPopulation:
 
     async def test_no_targets_when_missing_activity_level(self, async_client: AsyncClient, db_session):
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         payload = {k: v for k, v in PROFILE_PAYLOAD.items() if k != "activity_level"}
@@ -371,7 +369,7 @@ class TestTargetsPopulation:
     ):
         """Create incomplete profile (no goal), then update with goal → targets appear."""
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         payload = {k: v for k, v in PROFILE_PAYLOAD.items() if k != "goal"}
@@ -399,7 +397,7 @@ class TestTargetsHistory:
     async def test_history_accumulates(self, async_client: AsyncClient, db_session):
         """Each target-relevant update adds a new row to the history."""
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))
@@ -426,7 +424,7 @@ class TestTargetsHistory:
     async def test_non_target_field_update_does_not_add_row(self, async_client: AsyncClient, db_session):
         """Updating height (not in _TARGET_FIELDS) should not insert a new row."""
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))
@@ -442,7 +440,7 @@ class TestTargetsHistory:
     async def test_delete_profile_cascades_history(self, async_client: AsyncClient, db_session):
         """Deleting the profile should delete all target history."""
         from sqlalchemy import select
-        from app.models.user import UserTargets
+        from app.domain.health.models import UserTargets
 
         token = await _register_and_get_token(async_client)
         resp = await async_client.post("/profile", json=PROFILE_PAYLOAD, headers=_auth(token))

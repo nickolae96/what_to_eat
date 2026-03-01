@@ -11,8 +11,8 @@ from app.core.auth import (
     get_current_user,
 )
 from app.core.database import get_db_session
-from app.models.user import User
-from app.schemas.user import UserCreate, UserRead, Token, TokenRefresh
+from app.domain.user.models import User
+from app.domain.user.schemas import UserCreate, UserRead, Token, TokenRefresh
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -75,3 +75,4 @@ async def refresh(body: TokenRefresh, db: AsyncSession = Depends(get_db_session)
 @router.get("/me", response_model=UserRead)
 async def me(current_user: User = Depends(get_current_user)):
     return current_user
+

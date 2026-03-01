@@ -5,14 +5,18 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.core.database import Base, get_db_session
 from app.core.auth import hash_password, create_access_token
-from app.models.user import User
+from app.domain.user.models import User
 from app.main import app
 
-from sqlalchemy.dialects.postgresql import CITEXT
+from sqlalchemy.dialects.postgresql import CITEXT, UUID as PG_UUID
 
 @compiles(CITEXT, "sqlite")
 def _compile_citext_sqlite(type_, compiler, **kw):
     return "TEXT"
+
+@compiles(PG_UUID, "sqlite")
+def _compile_uuid_sqlite(type_, compiler, **kw):
+    return "CHAR(32)"
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 

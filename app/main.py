@@ -1,13 +1,17 @@
 from fastapi import FastAPI
 from app.core.database import Base, engine
-import app.models  # noqa: F401 — register all models with Base before create_all
+# Register all models with Base before create_all
+import app.domain.user.models  # noqa: F401
+import app.domain.health.models  # noqa: F401
+import app.domain.nutrition.models  # noqa: F401
 import asyncio
 from sqlalchemy.exc import OperationalError
 from contextlib import asynccontextmanager
 
 from app.api.health import router as health_router
-from app.api.auth import router as auth_router
-from app.api.profile import router as profile_router
+from app.domain.user.router import router as auth_router
+from app.domain.health.router import router as profile_router
+from app.domain.nutrition.router import router as nutrition_router
 from app.core.config import settings
 import logging
 
@@ -40,3 +44,4 @@ app = FastAPI(title="API", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(profile_router)
+app.include_router(nutrition_router)

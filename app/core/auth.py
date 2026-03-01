@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db_session
-from app.models.user import User
+from app.domain.user.models import User
 
 pwd_hash = PasswordHash.recommended()
 

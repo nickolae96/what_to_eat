@@ -3,22 +3,13 @@
 from dataclasses import dataclass
 from datetime import date
 
-from app.models.user import ActivityLevel, Gender, Goal
-
-ACTIVITY_MULTIPLIER: dict[ActivityLevel, float] = {
-    ActivityLevel.SEDENTARY: 1,
-    ActivityLevel.LIGHTLY_ACTIVE: 1.2,
-    ActivityLevel.MODERATELY_ACTIVE: 1.35,
-    ActivityLevel.VERY_ACTIVE: 1.45,
-    ActivityLevel.ATHLETE: 1.8,
-}
-
-GOAL_CALORIE_MULTIPLIER: dict[Goal, float] = {
-    Goal.CUT: 0.825,
-    Goal.MAINTAIN: 1.0,
-    Goal.BULK: 1.15,
-    Goal.RECOMP: 1.0,
-}
+from app.domain.health.models import (
+    ActivityLevel,
+    Gender,
+    Goal,
+    ACTIVITY_MULTIPLIER,
+    GOAL_CALORIE_MULTIPLIER,
+)
 
 
 def calculate_age(date_of_birth: date, today: date | None = None) -> int:

@@ -3,7 +3,8 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User, UserProfile, ActivityLevel, Goal, Gender
+from app.domain.user.models import User
+from app.domain.health.models import UserProfile, ActivityLevel, Goal, Gender
 from app.core.auth import hash_password
 
 
