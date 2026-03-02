@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Float, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Float, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,6 +29,14 @@ class Food(Base):
 
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR, nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_foods_search_vector", "search_vector", postgresql_using="gin"),
+    )
 
     aliases: Mapped[list["FoodAlias"]] = relationship(
         "FoodAlias",

@@ -1,5 +1,6 @@
 import uuid
 
+from datetime import date as date_type
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,14 +17,15 @@ from app.domain.nutrition.schemas import (
     FoodUpdate,
     MealCreate,
     MealRead,
+    IntakeResponse,
+    IntakeRequest,
 )
+from app.domain.nutrition.service import match_food
 from app.domain.user.models import User
-from app.domain.health.models import UserProfile
+from app.domain.health.models import UserProfile, DailyLog
 
 router = APIRouter(prefix="/nutrition", tags=["nutrition"])
 
-
-# ── Food CRUD ─────────────────────────────────────────────────────────
 
 @router.post("/foods", response_model=FoodRead, status_code=status.HTTP_201_CREATED)
 async def create_food(
@@ -105,8 +107,6 @@ async def delete_food(
     await db.flush()
 
 
-# ── Food Alias ────────────────────────────────────────────────────────
-
 @router.post("/foods/{food_id}/aliases", response_model=FoodAliasRead, status_code=status.HTTP_201_CREATED)
 async def create_food_alias(
     food_id: uuid.UUID,
@@ -141,8 +141,6 @@ async def delete_food_alias(
     await db.delete(alias)
     await db.flush()
 
-
-# ── Meal CRUD ─────────────────────────────────────────────────────────
 
 def _calculate_item_macros(food: Food, quantity_g: float) -> dict:
     factor = quantity_g / 100.0
@@ -275,3 +273,86 @@ async def delete_meal(
     await db.delete(meal)
     await db.flush()
 
+
+@router.post("/intake", response_model=IntakeResponse, status_code=201)
+async def log_intake(
+    body: IntakeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """
+    Accept a free-text food description, match it in the DB,
+    create (or reuse) today's DailyLog, create a Meal + MealItem,
+    and update the daily totals.
+    """
+    profile = await _get_profile_or_404(current_user, db)
+
+    food = await match_food(db, body.raw_input)
+    if food is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No food matched for '{body.raw_input}'",
+        )
+
+    factor = body.quantity_g / 100.0
+    cal = round(food.calories_per_100g * factor, 2)
+    pro = round(food.protein_per_100g * factor, 2)
+    carb = round(food.carbs_per_100g * factor, 2)
+    fat = round(food.fat_per_100g * factor, 2)
+
+    log_date = body.date or date_type.today()
+
+    stmt = select(DailyLog).where(
+        DailyLog.profile_id == profile.id,
+        DailyLog.date == log_date,
+    )
+    daily_log = (await db.execute(stmt)).scalar_one_or_none()
+
+    if daily_log is None:
+        daily_log = DailyLog(profile_id=profile.id, date=log_date)
+        db.add(daily_log)
+        await db.flush()
+
+    meal = Meal(
+        profile_id=profile.id,
+        daily_log_id=daily_log.id,
+        meal_type=body.meal_type,
+        raw_input_text=body.raw_input,
+        total_calories=cal,
+        total_protein_g=pro,
+        total_carbs_g=carb,
+        total_fat_g=fat,
+    )
+    db.add(meal)
+    await db.flush()
+
+    meal_item = MealItem(
+        meal_id=meal.id,
+        food_id=food.id,
+        quantity_g=body.quantity_g,
+        calculated_calories=cal,
+        calculated_protein_g=pro,
+        calculated_carbs_g=carb,
+        calculated_fat_g=fat,
+    )
+    db.add(meal_item)
+
+    daily_log.total_calories = (daily_log.total_calories or 0) + cal
+    daily_log.total_protein_g = (daily_log.total_protein_g or 0) + pro
+    daily_log.total_carbs_g = (daily_log.total_carbs_g or 0) + carb
+    daily_log.total_fat_g = (daily_log.total_fat_g or 0) + fat
+
+    await db.commit()
+    await db.refresh(meal_item)
+
+    return IntakeResponse(
+        daily_log_id=str(daily_log.id),
+        meal_id=str(meal.id),
+        meal_item_id=str(meal_item.id),
+        matched_food_name=food.name,
+        quantity_g=body.quantity_g,
+        calculated_calories=cal,
+        calculated_protein_g=pro,
+        calculated_carbs_g=carb,
+        calculated_fat_g=fat,
+    )

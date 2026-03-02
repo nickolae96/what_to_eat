@@ -1,7 +1,8 @@
 import uuid
+import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FoodCreate(BaseModel):
@@ -98,3 +99,35 @@ class MealRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+class IntakeRequest(BaseModel):
+    raw_input: str
+    quantity_g: float
+    meal_type: str | None = None
+    date: datetime.date | None = None
+
+    @field_validator("quantity_g")
+    @classmethod
+    def quantity_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("quantity_g must be positive")
+        return v
+
+    @field_validator("raw_input")
+    @classmethod
+    def raw_input_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("raw_input must not be blank")
+        return v
+
+
+class IntakeResponse(BaseModel):
+    daily_log_id: str
+    meal_id: str
+    meal_item_id: str
+    matched_food_name: str
+    quantity_g: float
+    calculated_calories: float
+    calculated_protein_g: float
+    calculated_carbs_g: float
+    calculated_fat_g: float

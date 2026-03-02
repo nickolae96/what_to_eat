@@ -1,3 +1,3 @@
-from app.domain.user.models import User  # noqa: F401
-from app.domain.health.models import UserProfile, UserTargets, DailyLog  # noqa: F401
-from app.domain.nutrition.models import Food, FoodAlias, Meal, MealItem  # noqa: F401
+from app.domain.user.models import *  # noqa: F401
+from app.domain.health.models import *  # noqa: F401
+from app.domain.nutrition.models import * # noqa: F401

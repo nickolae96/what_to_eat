@@ -243,9 +243,6 @@ async def get_targets_history(
     return result.scalars().all()
 
 
-# ── DailyLog CRUD ─────────────────────────────────────────────────────
-
-
 async def _get_profile_or_404(user: User, db: AsyncSession) -> UserProfile:
     result = await db.execute(
         select(UserProfile).where(UserProfile.user_id == user.id)

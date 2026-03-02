@@ -1,9 +1,5 @@
 from fastapi import FastAPI
-from app.core.database import Base, engine
-# Register all models with Base before create_all
-import app.domain.user.models  # noqa: F401
-import app.domain.health.models  # noqa: F401
-import app.domain.nutrition.models  # noqa: F401
+from app.core.database import engine
 import asyncio
 from sqlalchemy.exc import OperationalError
 from contextlib import asynccontextmanager
