@@ -13,23 +13,25 @@ logger = logging.getLogger(__name__)
 
 _client: AsyncOpenAI | None = None
 
-SYSTEM_PROMPT = """\
-You are a nutrition-parsing assistant.
-The user will describe what they ate in plain language.
-Your job is to decompose the description into individual food items.
+SYSTEM_PROMPT = """
+Extract foods from the user's message.
 
-You MUST respond with ONLY a valid JSON array — no explanations, \
-no preamble, no markdown, no commentary before or after the JSON.
+Return ONLY a JSON array.
 
-Each element must be an object with exactly these keys:
-- "food_name": a short, recognisable food name (e.g. "chicken breast", "white rice", "olive oil")
-- "quantity_g": estimated weight in grams (float). Use sensible defaults when the user is vague
-  (e.g. "a plate of rice" ≈ 250 g, "a glass of milk" ≈ 250 g, "a chicken breast" ≈ 150 g).
-- "meal_type": one of "breakfast", "lunch", "dinner", "snack" — infer from context, or null.
+Each item must follow this schema:
+{"food_name": string, "quantity_g": float, "meal_type": "breakfast|lunch|dinner|snack|null"}
 
-Example input:  "I had grilled chicken breast with a side of rice and a small salad for lunch"
-Example output:
-[{"food_name": "grilled chicken breast", "quantity_g": 150.0, "meal_type": "lunch"}, {"food_name": "white rice", "quantity_g": 250.0, "meal_type": "lunch"}, {"food_name": "mixed green salad", "quantity_g": 100.0, "meal_type": "lunch"}]
+Estimate portions when unclear:
+plate of rice = 250g
+glass of milk = 250g
+chicken breast = 150g
+
+Example:
+Input: grilled chicken breast with rice and salad for lunch
+Output:
+[{"food_name":"grilled chicken breast","quantity_g":150.0,"meal_type":"lunch"},
+{"food_name":"white rice","quantity_g":250.0,"meal_type":"lunch"},
+{"food_name":"mixed green salad","quantity_g":100.0,"meal_type":"lunch"}]
 """
 
 
@@ -158,15 +160,11 @@ async def decompose_meal_text(text: str) -> list[ParsedFoodItem]:
     kwargs: dict = dict(
         model=settings.llm_model,
         messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": text}],
-        temperature=0.2,
+        temperature=0,
+        top_p=0.9
     )
 
-    # Try structured JSON output first; fall back if the model doesn't support it
-    try:
-        response = await client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
-    except Exception:
-        logger.debug("response_format not supported, retrying without it")
-        response = await client.chat.completions.create(**kwargs)
+    response = await client.chat.completions.create(**kwargs)
 
     raw = response.choices[0].message.content or "[]"
     logger.debug("LLM raw response: %s", raw)
