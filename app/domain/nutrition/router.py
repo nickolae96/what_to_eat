@@ -8,7 +8,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.auth import get_current_user
 from app.core.database import get_db_session
-from app.domain.nutrition.models import Food, FoodAlias, Meal, MealItem
+from app.domain.nutrition.models import Food, FoodAlias, FoodEmbedding, Meal, MealItem
+from app.domain.nutrition.llm import decompose_meal_text
+from app.domain.nutrition.embedding import get_embedding
 from app.domain.nutrition.schemas import (
     FoodAliasCreate,
     FoodAliasRead,
@@ -19,10 +21,13 @@ from app.domain.nutrition.schemas import (
     MealRead,
     IntakeResponse,
     IntakeRequest,
+    SmartIntakeRequest,
+    SmartIntakeItemResponse,
+    SmartIntakeResponse,
 )
-from app.domain.nutrition.service import match_food
+from app.domain.nutrition.service import FoodMatcher, IntakeService
 from app.domain.user.models import User
-from app.domain.health.models import UserProfile, DailyLog
+from app.domain.health.models import UserProfile
 
 router = APIRouter(prefix="/nutrition", tags=["nutrition"])
 
@@ -142,16 +147,6 @@ async def delete_food_alias(
     await db.flush()
 
 
-def _calculate_item_macros(food: Food, quantity_g: float) -> dict:
-    factor = quantity_g / 100.0
-    return {
-        "calculated_calories": round(food.calories_per_100g * factor, 2),
-        "calculated_protein_g": round(food.protein_per_100g * factor, 2),
-        "calculated_carbs_g": round(food.carbs_per_100g * factor, 2),
-        "calculated_fat_g": round(food.fat_per_100g * factor, 2),
-    }
-
-
 async def _get_profile_or_404(user: User, db: AsyncSession) -> UserProfile:
     result = await db.execute(
         select(UserProfile).where(UserProfile.user_id == user.id)
@@ -163,6 +158,7 @@ async def _get_profile_or_404(user: User, db: AsyncSession) -> UserProfile:
             detail="Profile not found",
         )
     return profile
+
 
 
 @router.post("/meals", response_model=MealRead, status_code=status.HTTP_201_CREATED)
@@ -193,19 +189,22 @@ async def create_meal(
                 detail=f"Food {item_data.food_id} not found",
             )
 
-        macros = _calculate_item_macros(food, item_data.quantity_g)
+        macros = IntakeService.compute_macros(food, item_data.quantity_g)
         meal_item = MealItem(
             meal_id=meal.id,
             food_id=food.id,
             quantity_g=item_data.quantity_g,
-            **macros,
+            calculated_calories=macros["calories"],
+            calculated_protein_g=macros["protein_g"],
+            calculated_carbs_g=macros["carbs_g"],
+            calculated_fat_g=macros["fat_g"],
         )
         db.add(meal_item)
 
-        total_cal += macros["calculated_calories"]
-        total_protein += macros["calculated_protein_g"]
-        total_carbs += macros["calculated_carbs_g"]
-        total_fat += macros["calculated_fat_g"]
+        total_cal += macros["calories"]
+        total_protein += macros["protein_g"]
+        total_carbs += macros["carbs_g"]
+        total_fat += macros["fat_g"]
 
     meal.total_calories = round(total_cal, 2)
     meal.total_protein_g = round(total_protein, 2)
@@ -287,60 +286,22 @@ async def log_intake(
     """
     profile = await _get_profile_or_404(current_user, db)
 
-    food = await match_food(db, body.raw_input)
+    food = await FoodMatcher(db).match(body.raw_input)
     if food is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No food matched for '{body.raw_input}'",
-        )
-
-    factor = body.quantity_g / 100.0
-    cal = round(food.calories_per_100g * factor, 2)
-    pro = round(food.protein_per_100g * factor, 2)
-    carb = round(food.carbs_per_100g * factor, 2)
-    fat = round(food.fat_per_100g * factor, 2)
+        raise HTTPException(status_code=404, detail=f"No food matched for '{body.raw_input}'")
 
     log_date = body.date or date_type.today()
+    svc = IntakeService(db)
+    daily_log = await svc.get_or_create_daily_log(profile, log_date)
 
-    stmt = select(DailyLog).where(
-        DailyLog.profile_id == profile.id,
-        DailyLog.date == log_date,
-    )
-    daily_log = (await db.execute(stmt)).scalar_one_or_none()
-
-    if daily_log is None:
-        daily_log = DailyLog(profile_id=profile.id, date=log_date)
-        db.add(daily_log)
-        await db.flush()
-
-    meal = Meal(
-        profile_id=profile.id,
-        daily_log_id=daily_log.id,
+    meal, meal_item, macros = await svc.create_meal_with_item(
+        profile=profile,
+        daily_log=daily_log,
+        food=food,
+        quantity_g=body.quantity_g,
         meal_type=body.meal_type,
         raw_input_text=body.raw_input,
-        total_calories=cal,
-        total_protein_g=pro,
-        total_carbs_g=carb,
-        total_fat_g=fat,
     )
-    db.add(meal)
-    await db.flush()
-
-    meal_item = MealItem(
-        meal_id=meal.id,
-        food_id=food.id,
-        quantity_g=body.quantity_g,
-        calculated_calories=cal,
-        calculated_protein_g=pro,
-        calculated_carbs_g=carb,
-        calculated_fat_g=fat,
-    )
-    db.add(meal_item)
-
-    daily_log.total_calories = (daily_log.total_calories or 0) + cal
-    daily_log.total_protein_g = (daily_log.total_protein_g or 0) + pro
-    daily_log.total_carbs_g = (daily_log.total_carbs_g or 0) + carb
-    daily_log.total_fat_g = (daily_log.total_fat_g or 0) + fat
 
     await db.commit()
     await db.refresh(meal_item)
@@ -351,8 +312,140 @@ async def log_intake(
         meal_item_id=str(meal_item.id),
         matched_food_name=food.name,
         quantity_g=body.quantity_g,
-        calculated_calories=cal,
-        calculated_protein_g=pro,
-        calculated_carbs_g=carb,
-        calculated_fat_g=fat,
+        calculated_calories=macros["calories"],
+        calculated_protein_g=macros["protein_g"],
+        calculated_carbs_g=macros["carbs_g"],
+        calculated_fat_g=macros["fat_g"],
     )
+
+
+@router.post("/intake/smart", response_model=SmartIntakeResponse, status_code=201)
+async def smart_intake(
+    body: SmartIntakeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """
+    Accept free-form text (e.g. *"I had grilled chicken with rice and
+    a side salad for lunch"*), send it to the configured LLM which
+    decomposes it into individual food items with estimated quantities
+    """
+
+    profile = await _get_profile_or_404(current_user, db)
+
+    try:
+        parsed_items = await decompose_meal_text(body.text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LLM processing failed: {exc}")
+
+    if not parsed_items:
+        raise HTTPException(status_code=422, detail="LLM could not extract any food items from the text")
+
+    log_date = body.date or date_type.today()
+    svc = IntakeService(db)
+    daily_log = await svc.get_or_create_daily_log(profile, log_date)
+
+    matcher = FoodMatcher(db)
+    result_items: list[SmartIntakeItemResponse] = []
+    unmatched: list[str] = []
+
+    for parsed in parsed_items:
+        food = await matcher.match(parsed.food_name)
+        if food is None:
+            unmatched.append(parsed.food_name)
+            continue
+
+        meal, meal_item, macros = await svc.create_meal_with_item(
+            profile=profile,
+            daily_log=daily_log,
+            food=food,
+            quantity_g=parsed.quantity_g,
+            meal_type=parsed.meal_type,
+            raw_input_text=parsed.food_name,
+        )
+
+        result_items.append(
+            SmartIntakeItemResponse(
+                meal_id=str(meal.id),
+                meal_item_id=str(meal_item.id),
+                matched_food_name=food.name,
+                food_name_from_llm=parsed.food_name,
+                quantity_g=parsed.quantity_g,
+                meal_type=parsed.meal_type,
+                calculated_calories=macros["calories"],
+                calculated_protein_g=macros["protein_g"],
+                calculated_carbs_g=macros["carbs_g"],
+                calculated_fat_g=macros["fat_g"],
+            )
+        )
+
+    if not result_items:
+        raise HTTPException(status_code=404, detail=f"No foods could be matched. Unrecognised items: {unmatched}")
+
+    await db.commit()
+
+    return SmartIntakeResponse(
+        daily_log_id=str(daily_log.id),
+        items=result_items,
+        unmatched=unmatched,
+    )
+
+
+@router.post(
+    "/foods/{food_id}/embedding",
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate or refresh the pgvector embedding for a single food",
+)
+async def upsert_food_embedding(
+    food_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    food_result = await db.execute(select(Food).where(Food.id == food_id))
+    food = food_result.scalar_one_or_none()
+    if food is None:
+        raise HTTPException(status_code=404, detail="Food not found")
+
+    text = " ".join(filter(None, [food.name, food.brand, food.category]))
+    vector = await get_embedding(text)
+
+    existing = await db.execute(select(FoodEmbedding).where(FoodEmbedding.food_id == food_id))
+    emb = existing.scalar_one_or_none()
+
+    if emb is not None:
+        emb.embedding = vector
+    else:
+        emb = FoodEmbedding(food_id=food_id, embedding=vector)
+        db.add(emb)
+
+    await db.flush()
+    return {"food_id": str(food_id), "status": "ok"}
+
+
+@router.post(
+    "/foods/embeddings/refresh",
+    status_code=status.HTTP_200_OK,
+    summary="Regenerate embeddings for all foods",
+)
+async def refresh_all_embeddings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    foods = (await db.execute(select(Food))).scalars().all()
+    updated = 0
+    for food in foods:
+        text = " ".join(filter(None, [food.name, food.brand, food.category]))
+        vector = await get_embedding(text)
+
+        existing = await db.execute(select(FoodEmbedding).where(FoodEmbedding.food_id == food.id))
+        emb = existing.scalar_one_or_none()
+
+        if emb is not None:
+            emb.embedding = vector
+        else:
+            db.add(FoodEmbedding(food_id=food.id, embedding=vector))
+
+        updated += 1
+
+    await db.flush()
+    return {"updated": updated}

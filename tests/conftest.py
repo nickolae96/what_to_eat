@@ -9,6 +9,7 @@ from app.domain.user.models import User
 from app.main import app
 
 from sqlalchemy.dialects.postgresql import CITEXT, UUID as PG_UUID, TSVECTOR
+from pgvector.sqlalchemy import Vector
 
 @compiles(CITEXT, "sqlite")
 def _compile_citext_sqlite(type_, compiler, **kw):
@@ -20,6 +21,10 @@ def _compile_uuid_sqlite(type_, compiler, **kw):
 
 @compiles(TSVECTOR, "sqlite")
 def _compile_tsvector_sqlite(type_, compiler, **kw):
+    return "TEXT"
+
+@compiles(Vector, "sqlite")
+def _compile_vector_sqlite(type_, compiler, **kw):
     return "TEXT"
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

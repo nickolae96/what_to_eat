@@ -131,3 +131,35 @@ class IntakeResponse(BaseModel):
     calculated_protein_g: float
     calculated_carbs_g: float
     calculated_fat_g: float
+
+
+class SmartIntakeRequest(BaseModel):
+    text: str
+    date: datetime.date | None = None
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("text must not be blank")
+        return v
+
+
+class SmartIntakeItemResponse(BaseModel):
+    meal_id: str
+    meal_item_id: str
+    matched_food_name: str
+    food_name_from_llm: str
+    quantity_g: float
+    meal_type: str | None = None
+    calculated_calories: float
+    calculated_protein_g: float
+    calculated_carbs_g: float
+    calculated_fat_g: float
+
+
+class SmartIntakeResponse(BaseModel):
+    daily_log_id: str
+    items: list[SmartIntakeItemResponse]
+    unmatched: list[str] = []
+

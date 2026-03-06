@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -32,5 +32,5 @@ services:
       migrate:
         condition: service_completed_successfully
     command: >
-      ./scripts/wait-for-db.sh db
-      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      sh -c "./scripts/wait-for-db.sh db &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"

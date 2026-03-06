@@ -7,7 +7,10 @@ from sqlalchemy import Boolean, Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from pgvector.sqlalchemy import Vector
+
 from app.core.database import Base
+from app.core.config import settings
 
 if TYPE_CHECKING:
     from app.domain.health.models import DailyLog, UserProfile
@@ -98,3 +101,16 @@ class MealItem(Base):
     meal: Mapped["Meal"] = relationship("Meal", back_populates="items")
     food: Mapped["Food"] = relationship("Food")
 
+
+class FoodEmbedding(Base):
+    __tablename__ = "food_embeddings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    food_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("foods.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    embedding = mapped_column(Vector(settings.embedding_dimensions), nullable=False)
+    food: Mapped["Food"] = relationship("Food")
