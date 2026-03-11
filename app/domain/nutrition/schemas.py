@@ -146,20 +146,28 @@ class SmartIntakeRequest(BaseModel):
 
 
 class SmartIntakeItemResponse(BaseModel):
-    meal_id: str
     meal_item_id: str
     matched_food_name: str
     food_name_from_llm: str
     quantity_g: float
-    meal_type: str | None = None
     calculated_calories: float
     calculated_protein_g: float
     calculated_carbs_g: float
     calculated_fat_g: float
 
 
+class SmartIntakeMealResponse(BaseModel):
+    meal_id: str
+    meal_type: str | None = None
+    total_calories: float
+    total_protein_g: float
+    total_carbs_g: float
+    total_fat_g: float
+    items: list[SmartIntakeItemResponse]
+
+
 class SmartIntakeResponse(BaseModel):
     daily_log_id: str
-    items: list[SmartIntakeItemResponse]
+    meals: list[SmartIntakeMealResponse]
     unmatched: list[str] = []
 

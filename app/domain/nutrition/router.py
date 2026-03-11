@@ -23,6 +23,7 @@ from app.domain.nutrition.schemas import (
     IntakeRequest,
     SmartIntakeRequest,
     SmartIntakeItemResponse,
+    SmartIntakeMealResponse,
     SmartIntakeResponse,
 )
 from app.domain.nutrition.service import FoodMatcher, IntakeService
@@ -346,8 +347,12 @@ async def smart_intake(
     daily_log = await svc.get_or_create_daily_log(profile, log_date)
 
     matcher = FoodMatcher(db)
-    result_items: list[SmartIntakeItemResponse] = []
+    # meal_id -> list of SmartIntakeItemResponse
+    items_by_meal: dict[str, list[SmartIntakeItemResponse]] = {}
     unmatched: list[str] = []
+
+    # One meal per meal_type so all items of the same type share a meal row.
+    meals_by_type: dict[str | None, Meal] = {}
 
     for parsed in parsed_items:
         food = await matcher.match(parsed.food_name)
@@ -355,23 +360,31 @@ async def smart_intake(
             unmatched.append(parsed.food_name)
             continue
 
-        meal, meal_item, macros = await svc.create_meal_with_item(
-            profile=profile,
+        meal_type = parsed.meal_type
+
+        if meal_type not in meals_by_type:
+            meals_by_type[meal_type] = await svc.create_meal(
+                profile=profile,
+                daily_log=daily_log,
+                meal_type=meal_type,
+                raw_input_text=body.text,
+            )
+
+        meal = meals_by_type[meal_type]
+        meal_item, macros = await svc.add_item_to_meal(
+            meal=meal,
             daily_log=daily_log,
             food=food,
             quantity_g=parsed.quantity_g,
-            meal_type=parsed.meal_type,
-            raw_input_text=parsed.food_name,
         )
 
-        result_items.append(
+        meal_id_str = str(meal.id)
+        items_by_meal.setdefault(meal_id_str, []).append(
             SmartIntakeItemResponse(
-                meal_id=str(meal.id),
                 meal_item_id=str(meal_item.id),
                 matched_food_name=food.name,
                 food_name_from_llm=parsed.food_name,
                 quantity_g=parsed.quantity_g,
-                meal_type=parsed.meal_type,
                 calculated_calories=macros["calories"],
                 calculated_protein_g=macros["protein_g"],
                 calculated_carbs_g=macros["carbs_g"],
@@ -379,14 +392,27 @@ async def smart_intake(
             )
         )
 
-    if not result_items:
+    if not items_by_meal:
         raise HTTPException(status_code=404, detail=f"No foods could be matched. Unrecognised items: {unmatched}")
 
     await db.commit()
 
+    meals_response = [
+        SmartIntakeMealResponse(
+            meal_id=str(meal.id),
+            meal_type=meal.meal_type,
+            total_calories=meal.total_calories or 0.0,
+            total_protein_g=meal.total_protein_g or 0.0,
+            total_carbs_g=meal.total_carbs_g or 0.0,
+            total_fat_g=meal.total_fat_g or 0.0,
+            items=items_by_meal[str(meal.id)],
+        )
+        for meal in meals_by_type.values()
+    ]
+
     return SmartIntakeResponse(
         daily_log_id=str(daily_log.id),
-        items=result_items,
+        meals=meals_response,
         unmatched=unmatched,
     )
 

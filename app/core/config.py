@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768
     llm_api_url: str = "http://host.docker.internal:8081/v1"
     llm_api_key: str = "local"
-    llm_model: str = "llama-2-7b-chat"
+    llm_model: str = "qwen2.5-7b-instruct"
 
     model_config = SettingsConfigDict()
 

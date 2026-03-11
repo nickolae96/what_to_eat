@@ -2,6 +2,7 @@ import logging
 import re
 import unicodedata
 from datetime import date as date_type
+from functools import partial
 
 from sqlalchemy import func, select, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,16 +43,16 @@ class FoodMatcher:
         norm = normalize(trimmed)
 
         strategies = [
-            self._by_exact_alias(trimmed),
-            self._by_normalized_alias(norm),
-            self._by_normalized_name(norm),
-            self._by_tokens(norm),
-            self._by_full_text(trimmed),
-            self._by_semantic(trimmed),
+            partial(self._by_exact_alias, trimmed),
+            partial(self._by_normalized_alias, norm),
+            partial(self._by_normalized_name, norm),
+            partial(self._by_tokens, norm),
+            partial(self._by_full_text, trimmed),
+            partial(self._by_semantic, trimmed),
         ]
 
         for strategy in strategies:
-            food = await strategy
+            food = await strategy()
             if food is not None:
                 return food
 
@@ -234,20 +235,53 @@ class IntakeService:
         raw_input_text: str,
     ) -> tuple[Meal, MealItem, dict[str, float]]:
         """Create a Meal + MealItem, update daily-log totals, return both rows and macros."""
-        macros = self.compute_macros(food, quantity_g)
+        meal = await self.create_meal(
+            profile=profile,
+            daily_log=daily_log,
+            meal_type=meal_type,
+            raw_input_text=raw_input_text,
+        )
+        meal_item, macros = await self.add_item_to_meal(
+            meal=meal,
+            daily_log=daily_log,
+            food=food,
+            quantity_g=quantity_g,
+        )
+        return meal, meal_item, macros
 
+    async def create_meal(
+        self,
+        *,
+        profile: UserProfile,
+        daily_log: DailyLog,
+        meal_type: str | None,
+        raw_input_text: str,
+    ) -> Meal:
+        """Create an empty Meal row and flush it so its ``id`` is available."""
         meal = Meal(
             profile_id=profile.id,
             daily_log_id=daily_log.id,
             meal_type=meal_type,
             raw_input_text=raw_input_text,
-            total_calories=macros["calories"],
-            total_protein_g=macros["protein_g"],
-            total_carbs_g=macros["carbs_g"],
-            total_fat_g=macros["fat_g"],
+            total_calories=0.0,
+            total_protein_g=0.0,
+            total_carbs_g=0.0,
+            total_fat_g=0.0,
         )
         self._db.add(meal)
         await self._db.flush()
+        return meal
+
+    async def add_item_to_meal(
+        self,
+        *,
+        meal: Meal,
+        daily_log: DailyLog,
+        food: Food,
+        quantity_g: float,
+    ) -> tuple[MealItem, dict[str, float]]:
+        """Add a MealItem to an existing Meal and update meal + daily-log totals."""
+        macros = self.compute_macros(food, quantity_g)
 
         meal_item = MealItem(
             meal_id=meal.id,
@@ -260,6 +294,11 @@ class IntakeService:
         )
         self._db.add(meal_item)
 
+        meal.total_calories = (meal.total_calories or 0) + macros["calories"]
+        meal.total_protein_g = (meal.total_protein_g or 0) + macros["protein_g"]
+        meal.total_carbs_g = (meal.total_carbs_g or 0) + macros["carbs_g"]
+        meal.total_fat_g = (meal.total_fat_g or 0) + macros["fat_g"]
+
         daily_log.total_calories = (daily_log.total_calories or 0) + macros["calories"]
         daily_log.total_protein_g = (daily_log.total_protein_g or 0) + macros["protein_g"]
         daily_log.total_carbs_g = (daily_log.total_carbs_g or 0) + macros["carbs_g"]
@@ -267,4 +306,4 @@ class IntakeService:
 
         await self._db.flush()
 
-        return meal, meal_item, macros
+        return meal_item, macros
